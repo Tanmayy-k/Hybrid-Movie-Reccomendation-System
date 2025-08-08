@@ -1,0 +1,7 @@
+# A comment to force a rebuild
+streamlit
+pandas
+numpy
+joblib
+scikit-learn
+scikit-surprise
