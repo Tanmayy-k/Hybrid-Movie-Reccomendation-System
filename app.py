@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
-import requests # Needed for API calls
 from sklearn.metrics.pairwise import cosine_similarity
 
 # =====================================================================================
@@ -27,31 +26,33 @@ index_to_movie_id_map = assets['index_to_movie_id_map']
 movie_ids_array = assets['movie_ids_array']
 
 # =====================================================================================
-# MOVIE POSTER FETCHING FUNCTION (Using OMDb)
+# HELPER FUNCTIONS
 # =====================================================================================
 @st.cache_data
-def fetch_poster(movie_title):
-    """Fetches a movie poster URL from The OMDb API."""
-    # --- IMPORTANT: PASTE YOUR OMDb API KEY HERE ---
-    api_key = "YOUR_OMDB_API_KEY"
-    # ----------------------------------------------
-
-    if api_key == "YOUR_OMDB_API_KEY":
-        return "https://via.placeholder.com/500x750.png?text=Please+Add+API+Key"
-
-    title_only = movie_title.split('(')[0].strip()
+def get_average_rating(movie_id):
+    """Calculates the average rating for a movie and creates a star representation."""
+    avg_rating = ratings_df[ratings_df['movieId'] == movie_id]['rating'].mean()
+    if pd.isna(avg_rating):
+        return 0, "No ratings", "" # Return 0 for sorting
     
-    url = f"http://www.omdbapi.com/?t={title_only}&apikey={api_key}"
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        data = response.json()
-        if data.get('Poster') and data['Poster'] != 'N/A':
-            return data['Poster']
-    except requests.exceptions.RequestException as e:
-        st.error(f"API request failed: {e}")
-    return "https://via.placeholder.com/500x750.png?text=Poster+Not+Found" # Fallback image
+    star_rating = '⭐' * int(round(avg_rating))
+    return avg_rating, f"{avg_rating:.1f}/5.0", star_rating
 
+@st.cache_data
+def get_user_top_genres(user_id):
+    """Finds the top genres for a given user based on their high ratings."""
+    user_ratings = ratings_df[ratings_df['userId'] == user_id]
+    high_rated = user_ratings[user_ratings['rating'] >= 4]
+    if high_rated.empty:
+        return "No specific taste profile found."
+    
+    user_movies = movies_df[movies_df['movieId'].isin(high_rated['movieId'])]
+    genre_counts = user_movies['genres'].str.split('|', expand=True).stack().value_counts()
+    top_genres = genre_counts.head(3).index.tolist()
+    
+    if len(top_genres) == 0:
+        return "A diverse taste in movies."
+    return f"Based on your love for {', '.join(top_genres)} movies..."
 
 # =====================================================================================
 # RECOMMENDATION FUNCTION
@@ -97,18 +98,26 @@ def fast_hybrid_recommendations(user_id, svd_model, ratings_df, alpha=0.5, n=10)
     return top_n
 
 # =====================================================================================
-# FINAL STREAMLIT APP UI (with Final Fixes)
+# FINAL STREAMLIT APP UI (with Personalization & Filters)
 # =====================================================================================
 
 st.set_page_config(layout="wide", page_title="Movie Recommender")
 
-# --- Custom CSS for Netflix-like theme ---
+# --- Custom CSS for theme & cards ---
 st.markdown("""
 <style>
     .main { background-color: #141414; }
     .stApp { color: white; }
     h1, h2, h3, h4, h5, h6 { color: #E50914; }
     .st-eb { background-color: #222222; }
+    .movie-card {
+        background-color: #2D2D2D; border-radius: 10px; padding: 15px;
+        margin: 10px; text-align: center; border: 1px solid #444;
+        height: 250px; display: flex; flex-direction: column; justify-content: space-between;
+    }
+    .movie-title { font-size: 16px; font-weight: bold; color: white; margin-bottom: 5px; }
+    .movie-genre { font-size: 12px; color: #999; }
+    .movie-rating { font-size: 14px; color: #FFC300; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -116,41 +125,57 @@ st.title('🎬 Movie Recommender')
 
 # --- User Input ---
 st.sidebar.header('Enter Your User ID')
-# --- FIX IS HERE: The default value is now None, so the box starts empty ---
-user_id_input = st.sidebar.number_input('User ID (1 to 6040)', min_value=1, max_value=6040, value=None, step=1)
-# --- END OF FIX ---
+user_id_input = st.sidebar.number_input('User ID (1 to 6040)', min_value=1, max_value=6040, value=12, step=1)
 
 # --- Generate Recommendations ---
 if st.sidebar.button('Get Recommendations'):
-    if user_id_input is not None: # Only run if a user ID has been entered
-        with st.spinner('Finding movies you might like...'):
-            recommended_movie_ids = fast_hybrid_recommendations(
-                user_id=user_id_input, svd_model=svd_model, ratings_df=ratings_df, alpha=0.5, n=10
-            )
+    with st.spinner('Finding movies you might like...'):
+        recommended_movie_ids = fast_hybrid_recommendations(
+            user_id=user_id_input, svd_model=svd_model, ratings_df=ratings_df, alpha=0.5, n=20 # Get more to allow for filtering
+        )
+        
+        if recommended_movie_ids:
+            # --- Personalized Header (NEW) ---
+            st.header(f'Welcome, User {user_id_input}!')
+            st.write(get_user_top_genres(user_id_input))
+            st.markdown("---")
+
+            recommended_movies_df = pd.DataFrame(recommended_movie_ids, columns=['movieId']).merge(movies_df, on='movieId')
             
-            if recommended_movie_ids:
-                st.subheader(f'Top 10 Recommendations for User {user_id_input}')
-                
-                recommended_movies_df = pd.DataFrame(recommended_movie_ids, columns=['movieId']).merge(movies_df, on='movieId')
+            # Add average rating to the dataframe for sorting
+            recommended_movies_df['avg_rating'] = recommended_movies_df['movieId'].apply(lambda x: get_average_rating(x)[0])
 
-                cols_row1 = st.columns(5)
-                cols_row2 = st.columns(5)
-                
-                for i in range(min(5, len(recommended_movies_df))):
-                    with cols_row1[i]:
-                        movie = recommended_movies_df.iloc[i]
-                        poster_url = fetch_poster(movie['title'])
-                        st.image(poster_url, use_container_width=True)
-                        st.markdown(f"<p style='text-align: center; color: white;'>{movie['title']}</p>", unsafe_allow_html=True)
+            # --- Filtering and Sorting UI (NEW) ---
+            all_genres = sorted(list(set([genre for sublist in movies_df['genres'].str.split('|') for genre in sublist])))
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                genre_filter = st.selectbox('Filter by Genre:', ['All'] + all_genres)
+            with col2:
+                sort_order = st.selectbox('Sort by:', ['Recommendation Score', 'Average Rating'])
 
-                if len(recommended_movies_df) > 5:
-                    for i in range(5, len(recommended_movies_df)):
-                        with cols_row2[i-5]:
-                            movie = recommended_movies_df.iloc[i]
-                            poster_url = fetch_poster(movie['title'])
-                            st.image(poster_url, use_container_width=True)
-                            st.markdown(f"<p style='text-align: center; color: white;'>{movie['title']}</p>", unsafe_allow_html=True)
-            else:
-                st.error("Could not generate recommendations for this user.")
-    else:
-        st.sidebar.error("Please enter a User ID first.") # Show an error if the button is clicked with no user ID
+            # --- Apply Filters and Sorting ---
+            if genre_filter != 'All':
+                recommended_movies_df = recommended_movies_df[recommended_movies_df['genres'].str.contains(genre_filter)]
+            
+            if sort_order == 'Average Rating':
+                recommended_movies_df = recommended_movies_df.sort_values(by='avg_rating', ascending=False)
+            
+            st.subheader(f'Top 10 Recommendations for You')
+
+            # --- Display recommendations in cards ---
+            cols = st.columns(5)
+            # Ensure we only display up to 10 movies
+            for i, row in recommended_movies_df.head(10).iterrows():
+                with cols[i % 5]:
+                    avg_rating_val, avg_rating_text, stars = get_average_rating(row['movieId'])
+                    
+                    st.markdown(f"""
+                    <div class="movie-card">
+                        <div class="movie-title">{row['title']}</div>
+                        <div class="movie-genre">{row['genres']}</div>
+                        <div class="movie-rating">{stars}<br>{avg_rating_text}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+        else:
+            st.error("Could not generate recommendations for this user.")
