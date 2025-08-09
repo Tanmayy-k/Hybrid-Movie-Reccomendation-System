@@ -6,11 +6,12 @@ import requests # Needed for API calls
 from sklearn.metrics.pairwise import cosine_similarity
 
 # =====================================================================================
-# LOAD SAVED ASSETS
+# LOAD SAVED ASSETS (Using Streamlit's caching for efficiency)
 # =====================================================================================
 @st.cache_resource
 def load_assets():
     try:
+        # This function loads the saved model and data from the .joblib file
         return joblib.load('recommender_assets.joblib')
     except FileNotFoundError:
         st.error("Saved assets file not found! Ensure 'recommender_assets.joblib' is in your repository.")
@@ -26,16 +27,16 @@ index_to_movie_id_map = assets['index_to_movie_id_map']
 movie_ids_array = assets['movie_ids_array']
 
 # =====================================================================================
-# MOVIE POSTER FETCHING FUNCTION (Using OMDb)
+# MOVIE POSTER FETCHING FUNCTION (Updated for OMDb)
 # =====================================================================================
 @st.cache_data
 def fetch_poster(movie_title):
     """Fetches a movie poster URL from The OMDb API."""
     # --- IMPORTANT: PASTE YOUR OMDb API KEY HERE ---
-    api_key = "7711f131"
+    api_key = "68bf498a"
     # ----------------------------------------------
 
-    if api_key == "7711f131":
+    if api_key == "68bf498a":
         return "https://via.placeholder.com/500x750.png?text=Please+Add+API+Key"
 
     title_only = movie_title.split('(')[0].strip()
@@ -49,7 +50,8 @@ def fetch_poster(movie_title):
             return data['Poster']
     except requests.exceptions.RequestException as e:
         st.error(f"API request failed: {e}")
-    return "https://via.placeholder.com/500x750.png?text=Poster+Not+Found"
+    return "https://via.placeholder.com/500x750.png?text=Poster+Not+Found" # Fallback image
+
 
 # =====================================================================================
 # RECOMMENDATION FUNCTION
@@ -95,7 +97,7 @@ def fast_hybrid_recommendations(user_id, svd_model, ratings_df, alpha=0.5, n=10)
     return top_n
 
 # =====================================================================================
-# STREAMLIT APP UI (Simple Layout)
+# FINAL STREAMLIT APP UI (with Final Fixes)
 # =====================================================================================
 
 st.set_page_config(layout="wide", page_title="Movie Recommender")
@@ -126,14 +128,28 @@ if st.sidebar.button('Get Recommendations'):
         if recommended_movie_ids:
             st.subheader(f'Top 10 Recommendations for User {user_id_input}')
             
+            # Ensure the DataFrame is in the same order as the recommendations
             recommended_movies_df = pd.DataFrame(recommended_movie_ids, columns=['movieId']).merge(movies_df, on='movieId')
 
-            # --- Simple Layout: Display posters in a single row of columns ---
-            cols = st.columns(len(recommended_movies_df))
-            for i, row in recommended_movies_df.iterrows():
-                with cols[i]:
-                    poster_url = fetch_poster(row['title'])
+            # Create a layout with 2 rows of 5 columns for perfect alignment
+            cols_row1 = st.columns(5)
+            cols_row2 = st.columns(5)
+            
+            # Distribute the first 5 movies
+            for i in range(min(5, len(recommended_movies_df))):
+                with cols_row1[i]:
+                    movie = recommended_movies_df.iloc[i]
+                    poster_url = fetch_poster(movie['title'])
                     st.image(poster_url, use_container_width=True)
-                    st.markdown(f"<p style='text-align: center; color: white;'>{row['title']}</p>", unsafe_allow_html=True)
+                    st.markdown(f"<p style='text-align: center; color: white;'>{movie['title']}</p>", unsafe_allow_html=True)
+
+            # Distribute the next 5 movies
+            if len(recommended_movies_df) > 5:
+                for i in range(5, len(recommended_movies_df)):
+                    with cols_row2[i-5]:
+                        movie = recommended_movies_df.iloc[i]
+                        poster_url = fetch_poster(movie['title'])
+                        st.image(poster_url, use_container_width=True)
+                        st.markdown(f"<p style='text-align: center; color: white;'>{movie['title']}</p>", unsafe_allow_html=True)
         else:
             st.error("Could not generate recommendations for this user.")
