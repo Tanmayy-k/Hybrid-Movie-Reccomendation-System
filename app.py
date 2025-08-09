@@ -33,7 +33,7 @@ movie_ids_array = assets['movie_ids_array']
 def fetch_poster(movie_title):
     """Fetches a movie poster URL from The OMDb API."""
     # --- IMPORTANT: PASTE YOUR OMDb API KEY HERE ---
-    api_key = "YOUR_OMDB_API_KEY"
+    api_key = "7711f131"
     # ----------------------------------------------
 
     if api_key == "7711f131":
