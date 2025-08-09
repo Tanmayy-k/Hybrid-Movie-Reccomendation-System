@@ -98,8 +98,8 @@ st.markdown("""
     h1, h2, h3, h4, h5, h6 { color: #E50914; }
     .st-eb { background-color: #222222; }
     .movie-card {
-        /* --- FIX IS HERE: Card color is now a dark, muted red --- */
-        background-color: #5E0000;
+        /* --- FIX IS HERE: Card color is now the dark slate blue from your screenshot --- */
+        background-color: #2F4F4F;
         border-radius: 10px; padding: 15px; margin: 10px; text-align: center;
         border: 1px solid #444; height: 250px; display: flex; flex-direction: column;
         justify-content: space-between;
