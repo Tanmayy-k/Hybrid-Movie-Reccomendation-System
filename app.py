@@ -6,7 +6,7 @@ import requests # Needed for API calls
 from sklearn.metrics.pairwise import cosine_similarity
 
 # =====================================================================================
-# LOAD SAVED ASSETS
+# LOAD SAVED ASSETS (Using Streamlit's caching for efficiency)
 # =====================================================================================
 @st.cache_resource
 def load_assets():
