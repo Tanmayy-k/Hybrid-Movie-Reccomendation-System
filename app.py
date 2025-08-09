@@ -111,7 +111,7 @@ st.markdown("""
     h1, h2, h3, h4, h5, h6 { color: #E50914; }
     .st-eb { background-color: #222222; }
     .movie-card {
-        background-color: #2D2D2D;
+        background-color: #262730;
         border-radius: 10px; padding: 15px; margin: 10px; text-align: center;
         border: 1px solid #444; height: 250px; display: flex; flex-direction: column;
         justify-content: space-between;
