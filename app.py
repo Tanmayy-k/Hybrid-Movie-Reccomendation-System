@@ -98,12 +98,12 @@ st.markdown("""
     h1, h2, h3, h4, h5, h6 { color: #E50914; }
     .st-eb { background-color: #222222; }
     .movie-card {
-        background-color: #2D2D2D; border-radius: 10px; padding: 15px;
-        margin: 10px; text-align: center; border: 1px solid #444;
-        height: 250px; display: flex; flex-direction: column; justify-content: space-between;
+        background-color: #2D2D2D;
+        border-radius: 10px; padding: 15px; margin: 10px; text-align: center;
+        border: 1px solid #444; height: 250px; display: flex; flex-direction: column;
+        justify-content: space-between;
     }
     .movie-title { font-size: 16px; font-weight: bold; color: white; margin-bottom: 5px; }
-    /* --- FIX: CSS to handle genre text overflow --- */
     .movie-genre {
         font-size: 14px; color: #999;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -115,10 +115,10 @@ st.markdown("""
 st.title('🎬 Movie Recommender')
 
 # --- User Input Section ---
-# --- FIX: Use a form to handle both Enter key and button click ---
 with st.sidebar.form(key='recommendation_form'):
     st.header('Enter Your User ID')
-    user_id_input = st.number_input('User ID (1 to 6040)', min_value=1, max_value=6040, value=None, placeholder="Type user ID...")
+    # --- FIX IS HERE: The placeholder argument has been removed ---
+    user_id_input = st.number_input('User ID (1 to 6040)', min_value=1, max_value=6040, value=None)
     submit_button = st.form_submit_button(label='Get Recommendations')
 
 # --- Generate Recommendations ---
@@ -145,13 +145,11 @@ if submit_button:
                 with col2:
                     sort_order = st.selectbox('Sort by:', ['Recommendation Score', 'Average Rating'])
 
-                # Apply Filters and Sorting
                 if genre_filter != 'All':
                     recommended_movies_df = recommended_movies_df[recommended_movies_df['genres'].str.contains(genre_filter, regex=False)]
                 if sort_order == 'Average Rating':
                     recommended_movies_df = recommended_movies_df.sort_values(by='avg_rating', ascending=False)
                 
-                # --- FIX: Reset index after filtering/sorting ---
                 recommended_movies_df = recommended_movies_df.reset_index(drop=True)
                 
                 if recommended_movies_df.empty:
