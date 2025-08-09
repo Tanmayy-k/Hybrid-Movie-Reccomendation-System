@@ -36,7 +36,7 @@ def fetch_poster(movie_title):
     api_key = "YOUR_OMDB_API_KEY"
     # ----------------------------------------------
 
-    if api_key == "YOUR_OMDB_API_KEY":
+    if api_key == "7711f131":
         return "https://via.placeholder.com/500x750.png?text=Please+Add+API+Key"
 
     title_only = movie_title.split('(')[0].strip()
