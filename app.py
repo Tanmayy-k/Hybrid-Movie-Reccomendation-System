@@ -10,6 +10,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 @st.cache_resource
 def load_assets():
     try:
+        # This function loads the saved model and data from the .joblib file
         return joblib.load('recommender_assets.joblib')
     except FileNotFoundError:
         st.error("Saved assets file not found! Ensure 'recommender_assets.joblib' is in your repository.")
@@ -32,10 +33,10 @@ def get_average_rating(movie_id):
     """Calculates the average rating for a movie and creates a star representation."""
     avg_rating = ratings_df[ratings_df['movieId'] == movie_id]['rating'].mean()
     if pd.isna(avg_rating):
-        return 0, "No ratings", "" # Return 0 for sorting
+        return "No ratings", ""
     
     star_rating = '⭐' * int(round(avg_rating))
-    return avg_rating, f"{avg_rating:.1f}/5.0", star_rating
+    return f"{avg_rating:.1f}/5.0", star_rating
 
 @st.cache_data
 def get_user_top_genres(user_id):
@@ -56,7 +57,7 @@ def get_user_top_genres(user_id):
 # =====================================================================================
 # RECOMMENDATION FUNCTION
 # =====================================================================================
-def fast_hybrid_recommendations(user_id, svd_model, ratings_df, alpha=0.5, n=20):
+def fast_hybrid_recommendations(user_id, svd_model, ratings_df, alpha=0.5, n=10):
     try: inner_uid = svd_model.trainset.to_inner_uid(user_id)
     except ValueError: return []
     
@@ -97,7 +98,7 @@ def fast_hybrid_recommendations(user_id, svd_model, ratings_df, alpha=0.5, n=20)
     return top_n
 
 # =====================================================================================
-# FINAL STREAMLIT APP UI
+# FINAL STREAMLIT APP UI (Simplified Version)
 # =====================================================================================
 
 st.set_page_config(layout="wide", page_title="Movie Recommender")
@@ -110,13 +111,12 @@ st.markdown("""
     h1, h2, h3, h4, h5, h6 { color: #E50914; }
     .st-eb { background-color: #222222; }
     .movie-card {
-        background-color: #2D2D2D; /* Uniform dark grey for all cards */
+        background-color: #2D2D2D;
         border-radius: 10px; padding: 15px; margin: 10px; text-align: center;
         border: 1px solid #444; height: 250px; display: flex; flex-direction: column;
         justify-content: space-between;
     }
     .movie-title { font-size: 16px; font-weight: bold; color: white; margin-bottom: 5px; }
-    /* --- FIX: Increased genre font size --- */
     .movie-genre { font-size: 14px; color: #999; }
     .movie-rating { font-size: 14px; color: #FFC300; }
 </style>
@@ -127,78 +127,42 @@ st.title('🎬 Movie Recommender')
 # --- User Input Section ---
 st.sidebar.header('Enter Your User ID')
 
-# Initialize session state for user ID if it doesn't exist
-if 'user_id' not in st.session_state:
-    st.session_state.user_id = ''
-
-# --- FIX: Function to handle recommendation logic ---
-def show_recommendations():
-    user_id_input = st.session_state.user_id
-    if user_id_input:
-        with st.spinner('Finding movies you might like...'):
-            recommended_movie_ids = fast_hybrid_recommendations(
-                user_id=user_id_input, svd_model=svd_model, ratings_df=ratings_df, alpha=0.5, n=20
-            )
-            
-            # Store recommendations in session state
-            if recommended_movie_ids:
-                st.session_state.recommendations = pd.DataFrame(recommended_movie_ids, columns=['movieId']).merge(movies_df, on='movieId')
-                st.session_state.recommendations['avg_rating'] = st.session_state.recommendations['movieId'].apply(lambda x: get_average_rating(x)[0])
-            else:
-                st.session_state.recommendations = None
-    else:
-        st.session_state.recommendations = None # Clear recommendations if no user ID
-
-# --- FIX: Use a form for the input and button ---
 with st.sidebar.form(key='recommendation_form'):
-    user_id_input = st.number_input('User ID (1 to 6040)', min_value=1, max_value=6040, value=None, key='user_id', placeholder="Type user ID & press Enter")
+    user_id_input = st.number_input('User ID (1 to 6040)', min_value=1, max_value=6040, value=None, placeholder="Type user ID & press Enter")
     submit_button = st.form_submit_button(label='Get Recommendations')
 
-# Trigger recommendations if the form is submitted (button click or enter)
-if submit_button:
-    show_recommendations()
+# --- Generate and Display Recommendations ---
+if submit_button and user_id_input is not None:
+    with st.spinner('Finding movies you might like...'):
+        recommended_movie_ids = fast_hybrid_recommendations(
+            user_id=user_id_input, svd_model=svd_model, ratings_df=ratings_df, alpha=0.5, n=10
+        )
+        
+        if recommended_movie_ids:
+            st.header(f'Welcome, User {user_id_input}!')
+            st.write(get_user_top_genres(user_id_input))
+            st.markdown("---")
 
-# --- Display Area ---
-if 'recommendations' in st.session_state and st.session_state.recommendations is not None:
-    recommended_movies_df = st.session_state.recommendations
-    
-    st.header(f'Welcome, User {st.session_state.user_id}!')
-    st.write(get_user_top_genres(st.session_state.user_id))
-    st.markdown("---")
-    
-    all_genres = sorted(list(set([genre for sublist in movies_df['genres'].str.split('|') for genre in sublist])))
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        genre_filter = st.selectbox('Filter by Genre:', ['All'] + all_genres)
-    with col2:
-        sort_order = st.selectbox('Sort by:', ['Recommendation Score', 'Average Rating'])
-
-    # Apply Filters and Sorting
-    if genre_filter != 'All':
-        recommended_movies_df = recommended_movies_df[recommended_movies_df['genres'].str.contains(genre_filter)]
-    if sort_order == 'Average Rating':
-        recommended_movies_df = recommended_movies_df.sort_values(by='avg_rating', ascending=False)
-    
-    # --- FIX: Reset index after filtering/sorting ---
-    recommended_movies_df = recommended_movies_df.reset_index(drop=True)
-    
-    if recommended_movies_df.empty:
-        st.warning("No recommendations match your filter.")
-    else:
-        st.subheader(f'Top Recommendations for You')
-        cols = st.columns(5)
-        for i, row in recommended_movies_df.head(10).iterrows():
-            with cols[i % 5]:
-                _, avg_rating_text, stars = get_average_rating(row['movieId'])
-                st.markdown(f"""
-                <div class="movie-card">
-                    <div class="movie-title">{row['title']}</div>
-                    <div class="movie-genre">{row['genres']}</div>
-                    <div class="movie-rating">{stars}<br>{avg_rating_text}</div>
-                </div>
-                """, unsafe_allow_html=True)
-elif st.session_state.get('user_id'): # Handle case where user exists but has no recs
-    st.error(f"Could not generate recommendations for User {st.session_state.user_id}.")
+            recommended_movies_df = pd.DataFrame(recommended_movie_ids, columns=['movieId']).merge(movies_df, on='movieId')
+            
+            st.subheader(f'Top 10 Recommendations for You')
+            
+            # --- Display recommendations in cards ---
+            cols = st.columns(5)
+            for i, row in recommended_movies_df.iterrows():
+                with cols[i % 5]:
+                    avg_rating_text, stars = get_average_rating(row['movieId'])
+                    
+                    st.markdown(f"""
+                    <div class="movie-card">
+                        <div class="movie-title">{row['title']}</div>
+                        <div class="movie-genre">{row['genres']}</div>
+                        <div class="movie-rating">{stars}<br>{avg_rating_text}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+        else:
+            st.error(f"Could not generate recommendations for User {user_id_input}.")
+elif submit_button and user_id_input is None:
+    st.sidebar.error("Please enter a User ID first.")
 else:
     st.info("Please enter a User ID in the sidebar to get recommendations.")
