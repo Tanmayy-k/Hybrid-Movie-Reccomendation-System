@@ -89,7 +89,7 @@ def fast_hybrid_recommendations(user_id, svd_model, ratings_df, alpha=0.5, n=10)
             top_n_df = scores_df.nlargest(n, 'hybrid_score')
             return top_n_df['movieId'].tolist()
 
-    # Fallback to pure SVD if content profile can't be built
+    # Fallback to pure SVD
     predictions = {mid: score for mid, score in zip(all_movie_ids, user_svd_scores)}
     rated_movies = user_ratings['movieId'].unique()
     unrated = {mid: score for mid, score in predictions.items() if mid not in rated_movies}
