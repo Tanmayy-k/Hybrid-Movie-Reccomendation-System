@@ -1,7 +1,9 @@
 # A comment to force a rebuild
 streamlit
 pandas
-numpy
+numpy==1.26.4
 joblib
 scikit-learn
+cython
 scikit-surprise
+requests
