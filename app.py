@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
-import requests # Needed for API calls
 from sklearn.metrics.pairwise import cosine_similarity
 
 # =====================================================================================
@@ -27,31 +26,17 @@ index_to_movie_id_map = assets['index_to_movie_id_map']
 movie_ids_array = assets['movie_ids_array']
 
 # =====================================================================================
-# MOVIE POSTER FETCHING FUNCTION (Updated for OMDb)
+# HELPER FUNCTION FOR STAR RATINGS
 # =====================================================================================
 @st.cache_data
-def fetch_poster(movie_title):
-    """Fetches a movie poster URL from The OMDb API."""
-    # --- IMPORTANT: PASTE YOUR OMDb API KEY HERE ---
-    api_key = "68bf498a"
-    # ----------------------------------------------
-
-    if api_key == "68bf498a":
-        return "https://via.placeholder.com/500x750.png?text=Please+Add+API+Key"
-
-    title_only = movie_title.split('(')[0].strip()
+def get_average_rating(movie_id):
+    """Calculates the average rating for a movie and creates a star representation."""
+    avg_rating = ratings_df[ratings_df['movieId'] == movie_id]['rating'].mean()
+    if pd.isna(avg_rating):
+        return "No ratings", ""
     
-    url = f"http://www.omdbapi.com/?t={title_only}&apikey={api_key}"
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        data = response.json()
-        if data.get('Poster') and data['Poster'] != 'N/A':
-            return data['Poster']
-    except requests.exceptions.RequestException as e:
-        st.error(f"API request failed: {e}")
-    return "https://via.placeholder.com/500x750.png?text=Poster+Not+Found" # Fallback image
-
+    star_rating = '⭐' * int(round(avg_rating))
+    return f"{avg_rating:.1f}/5.0", star_rating
 
 # =====================================================================================
 # RECOMMENDATION FUNCTION
@@ -97,18 +82,45 @@ def fast_hybrid_recommendations(user_id, svd_model, ratings_df, alpha=0.5, n=10)
     return top_n
 
 # =====================================================================================
-# FINAL STREAMLIT APP UI (with Final Fixes)
+# FINAL STREAMLIT APP UI (with Minimalist Cards & Star Ratings)
 # =====================================================================================
 
 st.set_page_config(layout="wide", page_title="Movie Recommender")
 
-# --- Custom CSS for Netflix-like theme ---
+# --- Custom CSS for Netflix-like theme & Metro Cards ---
 st.markdown("""
 <style>
     .main { background-color: #141414; }
     .stApp { color: white; }
     h1, h2, h3, h4, h5, h6 { color: #E50914; }
     .st-eb { background-color: #222222; }
+    
+    .movie-card {
+        background-color: #2D2D2D;
+        border-radius: 10px;
+        padding: 15px;
+        margin: 10px;
+        text-align: center;
+        border: 1px solid #444;
+        height: 250px; /* Fixed height for alignment */
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+    .movie-title {
+        font-size: 16px;
+        font-weight: bold;
+        color: white;
+        margin-bottom: 5px;
+    }
+    .movie-genre {
+        font-size: 12px;
+        color: #999;
+    }
+    .movie-rating {
+        font-size: 14px;
+        color: #FFC300; /* Gold color for stars */
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -128,28 +140,21 @@ if st.sidebar.button('Get Recommendations'):
         if recommended_movie_ids:
             st.subheader(f'Top 10 Recommendations for User {user_id_input}')
             
-            # Ensure the DataFrame is in the same order as the recommendations
             recommended_movies_df = pd.DataFrame(recommended_movie_ids, columns=['movieId']).merge(movies_df, on='movieId')
 
-            # Create a layout with 2 rows of 5 columns for perfect alignment
-            cols_row1 = st.columns(5)
-            cols_row2 = st.columns(5)
-            
-            # Distribute the first 5 movies
-            for i in range(min(5, len(recommended_movies_df))):
-                with cols_row1[i]:
-                    movie = recommended_movies_df.iloc[i]
-                    poster_url = fetch_poster(movie['title'])
-                    st.image(poster_url, use_container_width=True)
-                    st.markdown(f"<p style='text-align: center; color: white;'>{movie['title']}</p>", unsafe_allow_html=True)
+            # --- Display recommendations in perfectly aligned cards ---
+            cols = st.columns(5)
+            for i, row in recommended_movies_df.iterrows():
+                with cols[i % 5]:
+                    avg_rating_text, stars = get_average_rating(row['movieId'])
+                    
+                    st.markdown(f"""
+                    <div class="movie-card">
+                        <div class="movie-title">{row['title']}</div>
+                        <div class="movie-genre">{row['genres']}</div>
+                        <div class="movie-rating">{stars}<br>{avg_rating_text}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
-            # Distribute the next 5 movies
-            if len(recommended_movies_df) > 5:
-                for i in range(5, len(recommended_movies_df)):
-                    with cols_row2[i-5]:
-                        movie = recommended_movies_df.iloc[i]
-                        poster_url = fetch_poster(movie['title'])
-                        st.image(poster_url, use_container_width=True)
-                        st.markdown(f"<p style='text-align: center; color: white;'>{movie['title']}</p>", unsafe_allow_html=True)
         else:
             st.error("Could not generate recommendations for this user.")
