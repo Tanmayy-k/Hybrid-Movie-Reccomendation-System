@@ -1,13 +1,84 @@
+%%writefile app.py
+import os
+import re
+import typing
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
-import requests # Needed for API calls
-from sklearn.metrics.pairwise import cosine_similarity
+from justwatch import JustWatch  # Unofficial JustWatch wrapper
 
-# =====================================================================================
-# LOAD SAVED ASSETS
-# =====================================================================================
+# ============ Setup Poster Fetching ============
+
+jw = JustWatch(country='IN')  # You can change 'IN' to 'US' or any ISO country code
+PLACEHOLDER_POSTER = "https://via.placeholder.com/500x750.png?text=Poster+Not+Found"
+
+def _normalize_justwatch_url(s: str) -> typing.Optional[str]:
+    if not isinstance(s, str):
+        return None
+    s = s.strip()
+    if s.startswith('//'):
+        return 'https:' + s
+    if s.startswith('/'):
+        return 'https://images.justwatch.com' + s
+    if s.startswith('http'):
+        return s
+    if re.fullmatch(r'\d+', s):
+        return f'https://images.justwatch.com/poster/{s}/s592'
+    return None
+
+def _find_poster_in_obj(obj) -> typing.Optional[str]:
+    if isinstance(obj, str):
+        if '/poster/' in obj or 'images.justwatch.com' in obj:
+            return obj
+        return None
+    if isinstance(obj, dict):
+        for v in obj.values():
+            found = _find_poster_in_obj(v)
+            if found:
+                return found
+    if isinstance(obj, (list, tuple)):
+        for v in obj:
+            found = _find_poster_in_obj(v)
+            if found:
+                return found
+    return None
+
+@st.cache_data(ttl=60 * 60 * 24)  # Cache for 24 hours
+def fetch_poster_justwatch(title: str) -> str:
+    try:
+        results = jw.search_for_item(query=title, count=4)
+        if not results:
+            return PLACEHOLDER_POSTER
+        item = results[0]
+        # Try direct keys
+        for key in ("poster", "poster_path", "poster_url", "thumbnail", "image"):
+            if key in item and item[key]:
+                url = _normalize_justwatch_url(item[key])
+                if url:
+                    return url
+        # Try recursive search in the object
+        found = _find_poster_in_obj(item)
+        if found:
+            url = _normalize_justwatch_url(found)
+            if url:
+                return url
+        # Try fetching details by ID if available
+        title_id = item.get("id") or item.get("title_id") or item.get("object_id")
+        if title_id:
+            details = jw.get_title(title_id)
+            found = _find_poster_in_obj(details)
+            if found:
+                url = _normalize_justwatch_url(found)
+                if url:
+                    return url
+    except Exception as e:
+        print("JustWatch poster fetch error:", e)
+    return PLACEHOLDER_POSTER
+
+# ============ Load Assets ============
+
 try:
     assets = joblib.load('recommender_assets.joblib')
     svd_model = assets['svd_model']
@@ -21,45 +92,22 @@ except FileNotFoundError:
     st.error("Saved assets file not found! Ensure 'recommender_assets.joblib' is in your repository.")
     st.stop()
 
-# =====================================================================================
-# MOVIE POSTER FETCHING FUNCTION
-# =====================================================================================
-@st.cache_data
-def fetch_poster(movie_title):
-    """Fetches a movie poster URL from The Movie Database (TMDb) API."""
-    # NOTE: You will need to get your own free API key from themoviedb.org
-    api_key = "YOUR_TMDB_API_KEY" # Replace with your key if you have one
-    if api_key == "YOUR_TMDB_API_KEY": # Fallback if key is not set
-        return "https://via.placeholder.com/500x750.png?text=Please+Add+API+Key"
+# ============ Recommendation Logic ============
 
-    title_only = movie_title.split('(')[0].strip()
-    url = f"https://api.themoviedb.org/3/search/movie?api_key={api_key}&query={title_only}"
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        data = response.json()
-        if data['results'] and data['results'][0]['poster_path']:
-            poster_path = data['results'][0]['poster_path']
-            return f"https://image.tmdb.org/t/p/w500/{poster_path}"
-    except requests.exceptions.RequestException as e:
-        print(f"API request failed: {e}")
-    return "https://via.placeholder.com/500x750.png?text=Poster+Not+Found"
-
-
-# =====================================================================================
-# RECOMMENDATION FUNCTION
-# =====================================================================================
 def fast_hybrid_recommendations(user_id, svd_model, ratings_df, alpha=0.5, n=10):
-    try: inner_uid = svd_model.trainset.to_inner_uid(user_id)
-    except ValueError: return []
-    
+    try:
+        inner_uid = svd_model.trainset.to_inner_uid(user_id)
+    except ValueError:
+        return []
+
     all_movie_ids = [svd_model.trainset.to_raw_iid(iid) for iid in range(svd_model.trainset.n_items)]
     user_svd_scores = [svd_model.predict(user_id, mid).est for mid in all_movie_ids]
-    
+
     user_ratings = ratings_df[ratings_df['userId'] == user_id]
     liked_movies = user_ratings[user_ratings['rating'] >= 4]['movieId'].values
-    if len(liked_movies) == 0: liked_movies = user_ratings[user_ratings['rating'] >= 3]['movieId'].values
-    
+    if len(liked_movies) == 0:
+        liked_movies = user_ratings[user_ratings['rating'] >= 3]['movieId'].values
+
     if len(liked_movies) > 0:
         liked_indices = [movie_id_to_index_map.get(mid) for mid in liked_movies if mid in movie_id_to_index_map]
         if liked_indices:
@@ -67,30 +115,29 @@ def fast_hybrid_recommendations(user_id, svd_model, ratings_df, alpha=0.5, n=10)
             svd_df = pd.DataFrame({'movieId': all_movie_ids, 'svd_score': user_svd_scores})
             content_df = pd.DataFrame({'movieId': movie_ids_array, 'content_score': content_scores})
             scores_df = pd.merge(svd_df, content_df, on='movieId', how='inner')
+
             s_min, s_max = scores_df['svd_score'].min(), scores_df['svd_score'].max()
             c_min, c_max = scores_df['content_score'].min(), scores_df['content_score'].max()
-            scores_df['svd_norm'] = (scores_df['svd_score'] - s_min) / (s_max - s_min) if (s_max - s_min) > 0 else 0
-            scores_df['content_norm'] = (scores_df['content_score'] - c_min) / (c_max - c_min) if (c_max - c_min) > 0 else 0
-            scores_df['hybrid_score'] = (alpha * scores_df['svd_norm']) + ((1 - alpha) * scores_df['content_norm'])
-            rated_movies = user_ratings['movieId'].unique()
-            scores_df = scores_df[~scores_df['movieId'].isin(rated_movies)]
+
+            scores_df['svd_norm'] = ((scores_df['svd_score'] - s_min) / (s_max - s_min)) if (s_max > s_min) else 0
+            scores_df['content_norm'] = ((scores_df['content_score'] - c_min) / (c_max - c_min)) if (c_max > c_min) else 0
+            scores_df['hybrid_score'] = alpha * scores_df['svd_norm'] + (1 - alpha) * scores_df['content_norm']
+
+            rated = user_ratings['movieId'].unique()
+            scores_df = scores_df[~scores_df['movieId'].isin(rated)]
             top_n_df = scores_df.nlargest(n, 'hybrid_score')
             return top_n_df['movieId'].tolist()
 
-    # Fallback to pure SVD
     predictions = {mid: score for mid, score in zip(all_movie_ids, user_svd_scores)}
     rated_movies = user_ratings['movieId'].unique()
     unrated = {mid: score for mid, score in predictions.items() if mid not in rated_movies}
     top_n = sorted(unrated, key=unrated.get, reverse=True)[:n]
     return top_n
 
-# =====================================================================================
-# FINAL STREAMLIT APP UI (with Alignment and Caption Fixes)
-# =====================================================================================
+# ============ Streamlit App UI ============
 
 st.set_page_config(layout="wide", page_title="Movie Recommender")
 
-# --- Custom CSS for Netflix-like theme ---
 st.markdown("""
 <style>
     .main { background-color: #141414; }
@@ -102,42 +149,25 @@ st.markdown("""
 
 st.title('🎬 Movie Recommender')
 
-# --- User Input ---
 st.sidebar.header('Enter Your User ID')
 user_id_input = st.sidebar.number_input('User ID (1 to 6040)', min_value=1, max_value=6040, value=12, step=1)
 
-# --- Generate Recommendations ---
 if st.sidebar.button('Get Recommendations'):
     with st.spinner('Finding movies you might like...'):
-        recommended_movie_ids = fast_hybrid_recommendations(
-            user_id=user_id_input, svd_model=svd_model, ratings_df=ratings_df, alpha=0.5, n=10
-        )
-        
-        if recommended_movie_ids:
+        rec_ids = fast_hybrid_recommendations(user_id=user_id_input, svd_model=svd_model,
+                                              ratings_df=ratings_df, alpha=0.5, n=10)
+
+        if rec_ids:
             st.subheader(f'Top 10 Recommendations for User {user_id_input}')
-            
-            # --- FIX: Ensure the DataFrame is in the same order as the recommendations ---
-            recommended_movies_df = pd.DataFrame(recommended_movie_ids, columns=['movieId']).merge(movies_df, on='movieId')
+            rec_df = pd.DataFrame(rec_ids, columns=['movieId']).merge(movies_df, on='movieId')
 
-            # --- FIX: Create a layout with 2 rows of 5 columns for perfect alignment ---
-            cols_row1 = st.columns(5)
-            cols_row2 = st.columns(5)
-            
-            # Distribute the first 5 movies
-            for i in range(min(5, len(recommended_movies_df))):
-                with cols_row1[i]:
-                    movie = recommended_movies_df.iloc[i]
-                    poster_url = fetch_poster(movie['title'])
+            row1, row2 = st.columns(5), st.columns(5)
+            for i, movie in rec_df.iterrows():
+                col = row1[i] if i < 5 else row2[i - 5]
+                with col:
+                    poster_url = fetch_poster_justwatch(movie['title'])
                     st.image(poster_url, use_container_width=True)
-                    st.markdown(f"<p style='text-align: center; color: white;'>{movie['title']}</p>", unsafe_allow_html=True)
-
-            # Distribute the next 5 movies
-            if len(recommended_movies_df) > 5:
-                for i in range(5, len(recommended_movies_df)):
-                    with cols_row2[i-5]:
-                        movie = recommended_movies_df.iloc[i]
-                        poster_url = fetch_poster(movie['title'])
-                        st.image(poster_url, use_container_width=True)
-                        st.markdown(f"<p style='text-align: center; color: white;'>{movie['title']}</p>", unsafe_allow_html=True)
+                    st.markdown(f"<p style='text-align:center;color:white;'>{movie['title']}</p>",
+                                unsafe_allow_html=True)
         else:
             st.error("Could not generate recommendations for this user.")
